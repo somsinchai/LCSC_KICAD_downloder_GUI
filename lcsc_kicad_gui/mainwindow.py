@@ -76,6 +76,8 @@ class MainWindow(QMainWindow):
 
         root.addLayout(self._build_search_row())
 
+        self._view3d = View3D()
+
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self._build_side_panel())
         splitter.addWidget(self._build_preview_panel())
@@ -135,6 +137,10 @@ class MainWindow(QMainWindow):
         self._hidden_pins = QCheckBox("Show hidden pins in preview")
         self._hidden_pins.setChecked(True)
         layout.addWidget(self._hidden_pins)
+
+        self._show_grid = QCheckBox("Show 3D grid and axes")
+        self._show_grid.toggled.connect(self._view3d.set_grid_visible)
+        layout.addWidget(self._show_grid)
         return panel
 
     def _build_preview_panel(self) -> QWidget:
@@ -159,7 +165,6 @@ class MainWindow(QMainWindow):
         self._symbol_tab = SymbolTab(SYMBOL_BG)
         self._symbol_view = self._symbol_tab.view
         self._footprint_view = SvgView(FOOTPRINT_BG)
-        self._view3d = View3D()
 
         self._tabs = QTabWidget()
         self._tabs.addTab(self._symbol_tab, "Symbol")
@@ -208,6 +213,7 @@ class MainWindow(QMainWindow):
         if symbol_split:
             self._symbol_tab.splitter.restoreState(symbol_split)
         self._hidden_pins.setChecked(config.get_bool("preview/include_hidden_pins", True))
+        self._show_grid.setChecked(self._view3d.grid_visible())
 
         preferred = config.get_str("kicad/version")
         if preferred:

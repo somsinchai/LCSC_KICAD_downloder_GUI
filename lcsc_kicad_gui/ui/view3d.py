@@ -17,6 +17,7 @@ QML_FILE = Path(__file__).resolve().parent / "Model3dView.qml"
 PROBE_KEY = "preview/3d_probe"
 _STATUS_ERROR = 3  # RuntimeLoader.Error
 ENABLE_KEY = "preview/enable_3d"
+GRID_KEY = "preview/show_grid"
 
 
 class View3D(QWidget):
@@ -33,6 +34,7 @@ class View3D(QWidget):
 
         self._quick: QWidget | None = None
         self._pending: Path | None = None
+        self._grid_visible = config.get_bool(GRID_KEY, True)
 
     def show_model(self, obj_path: Path | None, bounds=None) -> None:
         if obj_path is None:
@@ -49,12 +51,22 @@ class View3D(QWidget):
             root.setProperty("hasExplicitBounds", True)
         else:
             root.setProperty("hasExplicitBounds", False)
+        root.setProperty("gridVisible", self._grid_visible)
         root.setProperty("modelSource", QUrl.fromLocalFile(str(obj_path)))
         self._stack.setCurrentWidget(self._quick)
         # RuntimeLoader can resolve synchronously, in which case the signal has
         # already fired by the time we get here — read the state directly too.
         if root.property("loaderStatus") == _STATUS_ERROR:
             self._on_load_failed(str(root.property("loaderError") or "unknown error"))
+
+    def set_grid_visible(self, visible: bool) -> None:
+        self._grid_visible = visible
+        config.set_value(GRID_KEY, visible)
+        if self._quick is not None and self._quick.rootObject() is not None:
+            self._quick.rootObject().setProperty("gridVisible", visible)
+
+    def grid_visible(self) -> bool:
+        return self._grid_visible
 
     def clear(self) -> None:
         self._pending = None

@@ -27,6 +27,13 @@ Item {
     property vector3d modelMax: Qt.vector3d(0, 0, 0)
     property bool hasExplicitBounds: false
 
+    // Ground plane and axis triad, all sized from the part in frameModel().
+    property real baseY: 0
+    property real gridStep: 1
+    property int gridLines: 20
+    property real axisLength: 5
+    readonly property real axisThin: Math.max(axisLength * 0.01, 0.002)
+
     View3D {
         id: view
         anchors.fill: parent
@@ -49,27 +56,71 @@ Item {
         DirectionalLight { eulerRotation.x:  35; eulerRotation.y: 120; brightness: 0.6 }
         DirectionalLight { eulerRotation.x:  85;                       brightness: 0.35 }
 
+        // EasyEDA models are Z-up; Qt and the camera above are Y-up. Rotating
+        // here lets the part sit on the ground plane the way it does on a board.
         Node {
-            id: pivot
-            RuntimeLoader {
-                id: loader
-                source: root.modelSource
-                onStatusChanged: {
-                    if (status === RuntimeLoader.Error) {
-                        root.loadFailed(errorString)
-                    } else if (status === RuntimeLoader.Success) {
-                        root.frameModel()
-                        root.loadSucceeded()
+            id: orient
+            eulerRotation.x: -90
+
+            Node {
+                id: pivot
+                RuntimeLoader {
+                    id: loader
+                    source: root.modelSource
+                    onStatusChanged: {
+                        if (status === RuntimeLoader.Error) {
+                            root.loadFailed(errorString)
+                        } else if (status === RuntimeLoader.Success) {
+                            root.frameModel()
+                            root.loadSucceeded()
+                        }
                     }
+                    onBoundsChanged: root.frameModel()
                 }
-                onBoundsChanged: root.frameModel()
             }
         }
 
-        AxisHelper {
-            enableXZGrid: root.gridVisible
-            enableAxisLines: root.gridVisible
+        // Ground plane, sized to the part and sitting exactly underneath it so
+        // it never cuts through the body. AxisHelper is fixed at 10000 units,
+        // which swamps a 20 mm component, and its grid is the XZ plane.
+        Node {
+            id: ground
+            position: Qt.vector3d(0, -root.baseY, 0)
             visible: root.gridVisible
+
+            Model {
+                eulerRotation.x: -90  // GridGeometry lies in XY; lay it flat
+                geometry: GridGeometry {
+                    horizontalLines: root.gridLines
+                    verticalLines: root.gridLines
+                    horizontalStep: root.gridStep
+                    verticalStep: root.gridStep
+                }
+                materials: DefaultMaterial {
+                    lighting: DefaultMaterial.NoLighting
+                    diffuseColor: "#39414c"
+                }
+            }
+
+            // Short axis triad at the origin, standing on the ground plane.
+            Model {
+                source: "#Cube"
+                position: Qt.vector3d(root.axisLength / 2, 0, 0)
+                scale: Qt.vector3d(root.axisLength / 100, root.axisThin / 100, root.axisThin / 100)
+                materials: DefaultMaterial { lighting: DefaultMaterial.NoLighting; diffuseColor: "#c0554d" }
+            }
+            Model {
+                source: "#Cube"
+                position: Qt.vector3d(0, root.axisLength / 2, 0)
+                scale: Qt.vector3d(root.axisThin / 100, root.axisLength / 100, root.axisThin / 100)
+                materials: DefaultMaterial { lighting: DefaultMaterial.NoLighting; diffuseColor: "#5a9e5a" }
+            }
+            Model {
+                source: "#Cube"
+                position: Qt.vector3d(0, 0, root.axisLength / 2)
+                scale: Qt.vector3d(root.axisThin / 100, root.axisThin / 100, root.axisLength / 100)
+                materials: DefaultMaterial { lighting: DefaultMaterial.NoLighting; diffuseColor: "#4a7fc0" }
+            }
         }
     }
 
@@ -136,6 +187,16 @@ Item {
         camera.lookAt(target)
     }
 
+    // A round grid spacing that puts roughly 10-16 squares across the part.
+    function niceStep(span) {
+        var steps = [0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100]
+        for (var i = 0; i < steps.length; ++i) {
+            if (span / steps[i] <= 16)
+                return steps[i]
+        }
+        return steps[steps.length - 1]
+    }
+
     // Recentre the geometry on the origin and pull back far enough to frame it,
     // whatever scale the model happens to arrive in.
     function frameModel() {
@@ -160,6 +221,16 @@ Item {
         if (!(diagonal > 0))
             diagonal = 10
         modelSpan = diagonal
+
+        // dx/dy are the board plane, dz the component height (model is Z-up).
+        var footprint = Math.max(dx, dy)
+        if (!(footprint > 0))
+            footprint = 10
+        baseY = dz / 2
+        gridStep = niceStep(footprint)
+        gridLines = Math.min(60, Math.max(6, Math.round(footprint * 1.6 / gridStep)))
+        axisLength = footprint * 0.55
+
         target = Qt.vector3d(0, 0, 0)
         yaw = 35
         pitch = 22
