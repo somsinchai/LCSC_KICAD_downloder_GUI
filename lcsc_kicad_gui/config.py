@@ -1,0 +1,47 @@
+"""Application paths and persisted settings."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from PySide6.QtCore import QSettings
+
+APP_NAME = "LCSC KiCad Downloader"
+APP_DIR = Path(__file__).resolve().parent.parent
+
+_local = os.environ.get("LOCALAPPDATA")
+DATA_DIR = Path(_local) / "LCSC_KICAD_downloader" if _local else APP_DIR / ".data"
+CACHE_DIR = DATA_DIR / "cache"
+QML_DIR = Path(__file__).resolve().parent / "ui"
+
+DEFAULT_ROOT = Path.home() / "Documents" / "KiCad" / "LCSC"
+
+
+def settings() -> QSettings:
+    """INI beside the app: readable, diffable, and deletable by the user."""
+    return QSettings(str(APP_DIR / "settings.ini"), QSettings.Format.IniFormat)
+
+
+def get_bool(key: str, default: bool) -> bool:
+    # QSettings hands back the string "false" from an INI file, which is
+    # truthy — the type argument is not optional here.
+    return bool(settings().value(key, default, type=bool))
+
+
+def get_str(key: str, default: str = "") -> str:
+    return str(settings().value(key, default))
+
+
+def set_value(key: str, value: object) -> None:
+    store = settings()
+    store.setValue(key, value)
+    store.sync()
+
+
+def output_root() -> Path:
+    return Path(get_str("output/root", str(DEFAULT_ROOT)))
+
+
+def ensure_dirs() -> None:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
