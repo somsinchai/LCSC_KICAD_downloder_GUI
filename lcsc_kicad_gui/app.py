@@ -42,4 +42,10 @@ def main(argv: list[str] | None = None) -> int:
 
     window = MainWindow()
     window.show()
+
+    if "--selftest" in argv:
+        from .selftest import run_selftest
+
+        return run_selftest(app, window)
+
     return app.exec()

@@ -3,17 +3,35 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
 
 APP_NAME = "LCSC KiCad Downloader"
-APP_DIR = Path(__file__).resolve().parent.parent
+
+FROZEN = getattr(sys, "frozen", False)
+
+# Where settings.ini lives. In a PyInstaller build the package sits inside
+# _internal/, which is the wrong place to write to (and unwritable under
+# Program Files), so use the folder holding the .exe instead.
+APP_DIR = (
+    Path(sys.executable).resolve().parent
+    if FROZEN
+    else Path(__file__).resolve().parent.parent
+)
+
+# Where bundled read-only resources (the QML scene) are unpacked.
+RESOURCE_DIR = (
+    Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    if FROZEN
+    else Path(__file__).resolve().parent.parent
+)
 
 _local = os.environ.get("LOCALAPPDATA")
 DATA_DIR = Path(_local) / "LCSC_KICAD_downloader" if _local else APP_DIR / ".data"
 CACHE_DIR = DATA_DIR / "cache"
-QML_DIR = Path(__file__).resolve().parent / "ui"
+QML_DIR = RESOURCE_DIR / "lcsc_kicad_gui" / "ui"
 
 DEFAULT_ROOT = Path.home() / "Documents" / "KiCad" / "LCSC"
 

@@ -46,8 +46,9 @@ built in.
 ## Requirements
 
 - **Windows 10 or 11** (64-bit)
-- **Python 3.10 – 3.14** — [python.org/downloads](https://www.python.org/downloads/)
 - **KiCad 8, 9 or 10** — optional, but without it you lose the accurate previews
+- **Python 3.10 – 3.14** — only if you run from source
+  ([python.org/downloads](https://www.python.org/downloads/))
 
 > [!WARNING]
 > Pick your KiCad version in the top-right **before** you download. It sets the
@@ -56,6 +57,26 @@ built in.
 > re-download.
 
 ## Install
+
+### Download the app (no Python needed)
+
+Grab the zip from the [Releases page](https://github.com/somsinchai/LCSC_KICAD_downloder_GUI/releases),
+unpack it anywhere, and run **`LCSC-KiCad-Downloader.exe`**.
+
+It ships as a folder rather than a single `.exe`. That is deliberate: Qt is
+LGPL-licensed, which requires that you be able to swap in your own build of Qt,
+and keeping the DLLs as ordinary files next to the program is what makes that
+possible. It also starts much faster than a self-extracting build would.
+
+Windows SmartScreen will warn you the first time, because the executable isn't
+code-signed — *More info* → *Run anyway*. If you'd rather not trust a binary
+from a stranger, run from source instead; it's three commands.
+
+To check your install, run `LCSC-KiCad-Downloader.exe --selftest`. It fetches a
+known part, exercises every stage, and writes `selftest-report.txt` beside the
+executable. Attach that file if you report a bug.
+
+### Or run from source
 
 ```
 setup.bat
@@ -66,6 +87,14 @@ Finds a suitable Python, creates `.venv`, and installs the dependencies. Then:
 ```
 run.bat
 ```
+
+### Or build the executable yourself
+
+```
+build.bat
+```
+
+Produces `dist/LCSC-KiCad-Downloader/` and a zip beside it.
 
 ## Using it
 
@@ -125,9 +154,13 @@ which is what the button does.
 ## Command line
 
 ```
-run.bat --debug     keep a console window open with the log
-run.bat --no-3d     start without the 3D tab
+run.bat --debug        keep a console window open with the log
+run.bat --no-3d        start without the 3D tab
+run.bat --selftest     check the install and write selftest-report.txt
 ```
+
+The packaged build takes the same flags:
+`LCSC-KiCad-Downloader.exe --selftest`.
 
 ## Troubleshooting
 
@@ -204,4 +237,6 @@ What that means for you:
   section 13 never comes into play. It would if you turned this into a web
   service: then you'd have to offer your users the source.
 
-Qt is used through PySide6 under the LGPL-3.0.
+Qt is used through PySide6 under the LGPL-3.0. The packaged build bundles Qt;
+see [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) for the components it
+ships and where to get their source.

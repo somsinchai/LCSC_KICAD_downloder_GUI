@@ -14,11 +14,13 @@ settings.ini
 # easyeda2kicad writes its API response cache into the working directory
 .easyeda_cache/
 
-# Packaging
+# Packaging - build.spec IS tracked; PyInstaller's generated ones are not
 build/
 dist/
 *.egg-info/
-*.spec
+
+# Written by --selftest
+selftest-report.txt
 
 # Tooling caches
 .pytest_cache/

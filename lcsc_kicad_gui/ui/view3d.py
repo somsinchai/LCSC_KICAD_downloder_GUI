@@ -12,7 +12,9 @@ from PySide6.QtWidgets import QLabel, QStackedLayout, QWidget
 from .. import config
 
 log = logging.getLogger(__name__)
-QML_FILE = Path(__file__).resolve().parent / "Model3dView.qml"
+# Resolved through config so it also works from a PyInstaller build,
+# where the QML is unpacked next to the package rather than beside this file.
+QML_FILE = config.QML_DIR / "Model3dView.qml"
 
 PROBE_KEY = "preview/3d_probe"
 _STATUS_ERROR = 3  # RuntimeLoader.Error
