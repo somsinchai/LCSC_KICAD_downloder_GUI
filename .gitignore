@@ -1,3 +1,35 @@
+# Virtual environment
 .venv/
+venv/
+env/
+
+# Python bytecode
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+
+# Per-machine runtime state: window geometry, local output path, crash probe
+settings.ini
+
+# easyeda2kicad writes its API response cache into the working directory
+.easyeda_cache/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+*.spec
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store
