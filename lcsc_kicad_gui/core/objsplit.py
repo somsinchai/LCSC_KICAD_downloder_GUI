@@ -35,6 +35,32 @@ def _mtl_text(raw_obj: str) -> str:
     return "\n".join(lines)
 
 
+def obj_bounds(raw_obj: str) -> tuple[tuple[float, float, float], tuple[float, float, float]] | None:
+    """Axis-aligned bounds of the OBJ vertices, as (min xyz, max xyz).
+
+    Computed here rather than read back from QML: Qt's RuntimeLoader.bounds is
+    not reliably readable from Python, and we already have the vertex data.
+    """
+    lo = [float("inf")] * 3
+    hi = [float("-inf")] * 3
+    found = False
+    for line in raw_obj.splitlines():
+        parts = line.split()
+        if len(parts) < 4 or parts[0] != "v":
+            continue
+        try:
+            values = [float(parts[1]), float(parts[2]), float(parts[3])]
+        except ValueError:
+            continue
+        found = True
+        for axis in range(3):
+            lo[axis] = min(lo[axis], values[axis])
+            hi[axis] = max(hi[axis], values[axis])
+    if not found:
+        return None
+    return (lo[0], lo[1], lo[2]), (hi[0], hi[1], hi[2])
+
+
 def split_obj(raw_obj: str, out_dir: Path, stem: str = "model") -> tuple[Path, Path] | None:
     """Write ``<stem>.obj`` and ``<stem>.mtl`` into *out_dir*.
 

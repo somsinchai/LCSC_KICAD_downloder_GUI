@@ -31,7 +31,7 @@ from easyeda2kicad.kicad.export_kicad_symbol import ExporterSymbolKicad
 
 from . import render
 from .kicad_env import KicadInstall
-from .objsplit import split_obj
+from .objsplit import obj_bounds, split_obj
 from .staging import StagingArea, folder_name_for, sanitize_name
 from .symbolprops import SymbolProperty, read_symbol_properties
 
@@ -126,6 +126,7 @@ class PartBundle:
     ki_symbol_svgs: list[Path] = field(default_factory=list)
     ki_footprint_svg: Path | None = None
     obj_path: Path | None = None
+    obj_bounds: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
     has_3d: bool = False
     # (name, value) exactly as written into the .kicad_sym
     properties: list[SymbolProperty] = field(default_factory=list)
@@ -289,6 +290,7 @@ def _fetch(
         split = split_obj(model_3d.raw_obj, staging.preview_dir, stem="model")
         if split:
             bundle.obj_path = split[0]
+            bundle.obj_bounds = obj_bounds(model_3d.raw_obj)
 
     progress("Converting footprint…")
     if ee_footprint is not None:

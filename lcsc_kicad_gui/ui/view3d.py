@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import QUrl, Qt
+from PySide6.QtGui import QVector3D
 from PySide6.QtWidgets import QLabel, QStackedLayout, QWidget
 
 from .. import config
@@ -33,7 +34,7 @@ class View3D(QWidget):
         self._quick: QWidget | None = None
         self._pending: Path | None = None
 
-    def show_model(self, obj_path: Path | None) -> None:
+    def show_model(self, obj_path: Path | None, bounds=None) -> None:
         if obj_path is None:
             self._fail("No 3D model is available for this part.")
             return
@@ -41,6 +42,13 @@ class View3D(QWidget):
         if not self._ensure_view():
             return
         root = self._quick.rootObject()
+        if bounds is not None:
+            low, high = bounds
+            root.setProperty("modelMin", QVector3D(*low))
+            root.setProperty("modelMax", QVector3D(*high))
+            root.setProperty("hasExplicitBounds", True)
+        else:
+            root.setProperty("hasExplicitBounds", False)
         root.setProperty("modelSource", QUrl.fromLocalFile(str(obj_path)))
         self._stack.setCurrentWidget(self._quick)
         # RuntimeLoader can resolve synchronously, in which case the signal has

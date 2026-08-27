@@ -21,6 +21,11 @@ Item {
     property real distance: 60
     property vector3d target: Qt.vector3d(0, 0, 0)
     property real modelSpan: 10
+    // Bounds are supplied by the host from the OBJ itself; RuntimeLoader.bounds
+    // is not dependable here.
+    property vector3d modelMin: Qt.vector3d(0, 0, 0)
+    property vector3d modelMax: Qt.vector3d(0, 0, 0)
+    property bool hasExplicitBounds: false
 
     View3D {
         id: view
@@ -78,13 +83,20 @@ Item {
 
         property real lastX: 0
         property real lastY: 0
+        property bool dragging: false
 
         onPressed: function (event) {
             lastX = event.x
             lastY = event.y
+            dragging = true
         }
 
+        onReleased: dragging = false
+        onCanceled: dragging = false
+
         onPositionChanged: function (event) {
+            if (!dragging)
+                return
             var dx = event.x - lastX
             var dy = event.y - lastY
             lastX = event.x
@@ -127,15 +139,23 @@ Item {
     // Recentre the geometry on the origin and pull back far enough to frame it,
     // whatever scale the model happens to arrive in.
     function frameModel() {
-        var b = loader.bounds
-        if (!b)
-            return
-        var dx = b.maximum.x - b.minimum.x
-        var dy = b.maximum.y - b.minimum.y
-        var dz = b.maximum.z - b.minimum.z
-        pivot.position = Qt.vector3d(-(b.minimum.x + b.maximum.x) / 2,
-                                     -(b.minimum.y + b.maximum.y) / 2,
-                                     -(b.minimum.z + b.maximum.z) / 2)
+        var lo, hi
+        if (hasExplicitBounds) {
+            lo = modelMin
+            hi = modelMax
+        } else {
+            var b = loader.bounds
+            if (!b)
+                return
+            lo = b.minimum
+            hi = b.maximum
+        }
+        var dx = hi.x - lo.x
+        var dy = hi.y - lo.y
+        var dz = hi.z - lo.z
+        pivot.position = Qt.vector3d(-(lo.x + hi.x) / 2,
+                                     -(lo.y + hi.y) / 2,
+                                     -(lo.z + hi.z) / 2)
         var diagonal = Math.sqrt(dx * dx + dy * dy + dz * dz)
         if (!(diagonal > 0))
             diagonal = 10

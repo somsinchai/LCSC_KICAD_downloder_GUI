@@ -35,7 +35,13 @@ run.bat
 
 1. Type or paste a part number — `C54951858`. Paste several (separated by
    spaces, commas or newlines) to queue them.
-2. Check the three tabs. Scroll to zoom, drag to pan, double-click to fit.
+2. Check the three tabs.
+   - **Symbol** — the drawing on the left, the fields KiCad will attach to the
+     placed symbol on the right. Greyed rows are hidden on the schematic sheet.
+     Right-click a row to copy it. Drag the divider to resize.
+   - **Footprint** — scroll to zoom, drag to pan, double-click to fit.
+   - **3D** — left-drag to pan, right-drag to rotate, scroll to zoom,
+     double-click to re-frame.
 3. Pick the KiCad version in the top-right — it sets the `.kicad_sym` format
    version, so choose the KiCad you actually use. **A KiCad 10 library cannot
    be opened by KiCad 9 or 8.**

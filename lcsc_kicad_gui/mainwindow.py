@@ -44,6 +44,9 @@ log = logging.getLogger(__name__)
 SYMBOL_BG = "#ffffff"
 FOOTPRINT_BG = "#001023"  # matches pcbnew, so white silkscreen stays readable
 
+HINT_2D = "Scroll to zoom · drag to pan · double-click to fit"
+HINT_3D = "Left-drag to pan · right-drag to rotate · scroll to zoom · double-click to fit"
+
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -164,9 +167,10 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._view3d, "3D")
         layout.addWidget(self._tabs, 1)
 
-        hint = QLabel("Scroll to zoom · drag to pan · double-click to fit")
-        hint.setStyleSheet("color:#8a9099; font-size:11px;")
-        layout.addWidget(hint)
+        self._hint = QLabel(HINT_2D)
+        self._hint.setStyleSheet("color:#8a9099; font-size:11px;")
+        layout.addWidget(self._hint)
+        self._tabs.currentChanged.connect(self._on_tab_changed)
         return panel
 
     def _build_action_row(self) -> QHBoxLayout:
@@ -355,7 +359,7 @@ class MainWindow(QMainWindow):
         self._unit_combo.blockSignals(False)
 
         # Tier 2 where we have it, tier 1 otherwise — never an empty pane.
-        extra = [("LCSC part", bundle.lcsc_id)]
+        extra = []
         if bundle.footprint_name:
             extra.append(("Footprint file", f"{bundle.footprint_name}.kicad_mod"))
         extra.append(("3D model", bundle.model_name if bundle.has_3d else "none"))
@@ -377,7 +381,10 @@ class MainWindow(QMainWindow):
             kicad=symbol_from_kicad or footprint_from_kicad,
             version=install.version if install else "",
         )
-        self._view3d.show_model(bundle.obj_path)
+        self._view3d.show_model(bundle.obj_path, bundle.obj_bounds)
+
+    def _on_tab_changed(self, index: int) -> None:
+        self._hint.setText(HINT_3D if self._tabs.widget(index) is self._view3d else HINT_2D)
 
     def _on_unit_changed(self, index: int) -> None:
         if self._current is None or index < 0:
