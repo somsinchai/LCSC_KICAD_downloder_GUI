@@ -15,10 +15,11 @@ def main(argv: list[str] | None = None) -> int:
         format="[%(levelname)s] %(name)s: %(message)s",
     )
 
-    if "--no-3d" in argv:
-        from . import config
+    from . import config
 
-        config.set_value("preview/enable_3d", False)
+    # Runtime-only: persisting this would silently disable 3D forever, with no
+    # UI anywhere to turn it back on.
+    config.RUNTIME_NO_3D = "--no-3d" in argv
 
     # Direct3D 11 is the most dependable RHI backend on Windows; pick it
     # before QApplication exists, which is the only point it can be set.
@@ -32,7 +33,6 @@ def main(argv: list[str] | None = None) -> int:
 
     from PySide6.QtWidgets import QApplication
 
-    from . import config
     from .mainwindow import MainWindow
 
     config.ensure_dirs()

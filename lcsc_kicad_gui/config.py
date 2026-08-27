@@ -17,6 +17,10 @@ QML_DIR = Path(__file__).resolve().parent / "ui"
 
 DEFAULT_ROOT = Path.home() / "Documents" / "KiCad" / "LCSC"
 
+# Set from the --no-3d command line flag. Deliberately not persisted:
+# there is no settings UI to undo it with.
+RUNTIME_NO_3D = False
+
 
 def settings() -> QSettings:
     """INI beside the app: readable, diffable, and deletable by the user."""

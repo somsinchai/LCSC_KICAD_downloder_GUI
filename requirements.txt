@@ -1,2 +1,9 @@
-PySide6>=6.6
-easyeda2kicad>=1.0.1
+# QtQuick3D's RuntimeLoader (the 3D tab) needs >= 6.2, but 6.7 is the oldest
+# release this has been checked against. Tested on 6.11.2. The full PySide6
+# metapackage is required -- PySide6-Essentials does not include QtQuick3D.
+PySide6>=6.7,<7
+
+# The conversion engine. We reach into a few of its internals (the response
+# cache methods, ExporterSymbolKicad(version=...), Ee3dModel.raw_obj), so stay
+# on the 1.0.x line rather than trusting a future API.
+easyeda2kicad>=1.0.1,<1.1

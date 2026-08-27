@@ -1,0 +1,51 @@
+name: Bug report
+description: Something went wrong with a part, a preview, or the download
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most bugs here are specific to one component, so the LCSC part number
+        is the single most useful thing you can give me.
+  - type: input
+    id: lcsc
+    attributes:
+      label: LCSC part number
+      description: The part you were fetching, e.g. C54951858
+      placeholder: C54951858
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+  - type: input
+    id: kicad
+    attributes:
+      label: KiCad version
+      description: The one selected in the top-right of the window, or "none installed"
+      placeholder: "10.0.5"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: The version setup.bat reported, or run `.venv\Scripts\python.exe -V`
+      placeholder: "3.12.10"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 Pro 24H2
+  - type: textarea
+    id: log
+    attributes:
+      label: Log output
+      description: Run `run.bat --debug`, reproduce the problem, and paste the console output here.
+      render: text

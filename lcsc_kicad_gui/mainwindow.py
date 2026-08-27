@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import logging
-import os
-import subprocess
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThreadPool
-from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
-from PySide6.QtCore import QUrl
+from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -454,7 +451,6 @@ class MainWindow(QMainWindow):
             )
         self.statusBar().showMessage(f"{lcsc_id}: saved to {result.folder}")
 
-        bundle = self._bundles.get(lcsc_id)
         dialog = RegisterDialog(result, self._installs, self._install, self)
         dialog.exec()
 

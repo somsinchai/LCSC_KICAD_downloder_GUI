@@ -1,2 +1,10 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# cmd.exe parses batch files by byte offset and mis-executes multi-line
+# for/if blocks when the file has LF endings. Force CRLF regardless of the
+# cloner's core.autocrlf setting.
+*.bat text eol=crlf
+
+# Keep the licence byte-identical to the FSF's copy so GitHub detects it.
+LICENSE -text
