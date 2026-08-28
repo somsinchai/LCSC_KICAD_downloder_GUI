@@ -9,13 +9,16 @@ who is asked to check their install before filing a bug.
 from __future__ import annotations
 
 import platform
+import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
 
 from . import config
+from .core import project as project_mod
 from .core.kicad_env import detect_installs
 
 TEST_PART = "C54951858"
@@ -82,6 +85,61 @@ def run_selftest(app, window) -> int:
                 pass
         app.exit(1 if failures else 0)
 
+    def check_project_import(bundle) -> None:
+        """Exercise Import end to end against a throwaway project."""
+        temp = Path(tempfile.mkdtemp(prefix="lcsc_selftest_proj_"))
+        try:
+            (temp / "SelfTest.kicad_pro").write_text("{}", encoding="utf-8")
+            project = project_mod.find_project(temp)
+            record("project detected", project is not None, str(temp))
+            if project is None:
+                return
+
+            result = project_mod.import_part(bundle, project)
+            record(
+                "imported into a project",
+                not result.problems,
+                "; ".join(result.problems) or result.nickname,
+            )
+            record(
+                "project library tables written",
+                project.sym_table.is_file() and project.fp_table.is_file(),
+            )
+            record(
+                "library rows are project-relative",
+                result.commit.sym_uri.startswith(project_mod.PRJ_VAR)
+                and result.commit.fp_uri.startswith(project_mod.PRJ_VAR),
+                result.commit.sym_uri,
+            )
+
+            mods = list(result.commit.pretty_dir.glob("*.kicad_mod"))
+            models = [
+                line.strip().split(chr(34))[1]
+                for mod in mods
+                for line in mod.read_text(encoding="utf-8").splitlines()
+                if line.strip().startswith("(model ")
+            ]
+            if bundle.has_3d:
+                resolves = bool(models) and all(
+                    m.startswith(project_mod.PRJ_VAR)
+                    and Path(
+                        m.replace(project_mod.PRJ_VAR, project.directory.as_posix())
+                    ).is_file()
+                    for m in models
+                )
+                record("3D path is project-relative and resolves", resolves,
+                       models[0] if models else "no (model ...) found")
+
+            again = project_mod.import_part(bundle, project)
+            record(
+                "re-import is idempotent",
+                again.sym_row.unchanged and again.fp_row.unchanged,
+            )
+        except Exception as err:  # noqa: BLE001 - report, never crash the test
+            record("project import", False, f"{type(err).__name__}: {err}")
+        finally:
+            shutil.rmtree(temp, ignore_errors=True)
+
     def check_3d() -> None:
         view = window._view3d
         quick = getattr(view, "_quick", None)
@@ -120,6 +178,8 @@ def run_selftest(app, window) -> int:
             record("kicad-cli rendered the footprint", bundle.ki_footprint_svg is not None)
         else:
             lines.append("[SKIP] kicad-cli rendering - KiCad not installed")
+
+        check_project_import(bundle)
 
         if config.RUNTIME_NO_3D:
             lines.append("[SKIP] 3D view - started with --no-3d")
