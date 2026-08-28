@@ -7,7 +7,11 @@ import shutil
 import tempfile
 from pathlib import Path
 
-_ILLEGAL = re.compile(r'[<>:"/\|?*\x00-\x1f]')
+# The folder name, the library file stem and the KiCad library nickname are all
+# the same string, so this has to satisfy the strictest of the three. KiCad's
+# own 223 shipped nicknames use nothing outside [A-Za-z0-9_]; hyphen and dot are
+# accepted too and part numbers are full of them, so allow those and no more.
+_DISALLOWED = re.compile(r"[^A-Za-z0-9_.-]")
 _RESERVED = {
     "CON", "PRN", "AUX", "NUL",
     *(f"COM{i}" for i in range(1, 10)),
@@ -17,13 +21,14 @@ MAX_NAME_LEN = 60
 
 
 def sanitize_name(name: str, max_len: int = MAX_NAME_LEN) -> str:
-    """Make *name* safe as a Windows folder-name component.
+    """Make *name* usable as a folder name, a file stem and a KiCad nickname.
 
     EasyEDA metadata is full of CJK (e.g. manufacturer "ESPRESSIF(乐鑫)") and
-    characters Windows rejects, so strip to ASCII and drop the illegal set.
+    punctuation that is fine in a filename but not in a library nickname, so
+    reduce to ASCII and then to the conservative nickname character set.
     """
-    cleaned = _ILLEGAL.sub("_", name)
-    cleaned = cleaned.encode("ascii", "ignore").decode("ascii")
+    cleaned = name.encode("ascii", "ignore").decode("ascii")
+    cleaned = _DISALLOWED.sub("_", cleaned)
     cleaned = re.sub(r"\s+", "_", cleaned).strip("._ ")
     cleaned = re.sub(r"_{2,}", "_", cleaned)
     if len(cleaned) > max_len:
@@ -36,9 +41,10 @@ def sanitize_name(name: str, max_len: int = MAX_NAME_LEN) -> str:
 def folder_name_for(lcsc_id: str, symbol_name: str) -> str:
     """The part's own name, e.g. `ESP32-C5-WROOM-1U-N8R8-V1.2`.
 
-    The LCSC id is not in the folder name — it is still the library nickname
-    and the stem of every file inside, so nothing is lost by leaving it out of
-    the folder. Falls back to the id when the part has no usable name.
+    This one string is the folder name, the stem of every file inside it and
+    the KiCad library nickname, so a part reads the same everywhere. The LCSC
+    id is not lost -- it stays as the symbol's "LCSC Part" field. Falls back to
+    the id when a part has no usable name.
     """
     name = sanitize_name(symbol_name)
     return name if name and name != "part" else lcsc_id
@@ -52,17 +58,14 @@ class StagingArea:
     what lands in the library.
     """
 
-    def __init__(self, lcsc_id: str) -> None:
+    def __init__(self, lcsc_id: str, lib_name: str | None = None) -> None:
         self.lcsc_id = lcsc_id
+        # Names the library files and doubles as the KiCad nickname. Defaults
+        # to the LCSC id only when the caller has no better name to offer.
+        self.lib_name = lib_name or lcsc_id
         self._tmp = Path(tempfile.mkdtemp(prefix=f"lcsc_{lcsc_id}_"))
         self.part_dir = self._tmp / lcsc_id
         self.part_dir.mkdir(parents=True, exist_ok=True)
-
-    # The library basename inside the folder is the bare LCSC id: short,
-    # unique, and it doubles as the KiCad library nickname.
-    @property
-    def lib_name(self) -> str:
-        return self.lcsc_id
 
     @property
     def sym_path(self) -> Path:

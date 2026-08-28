@@ -27,14 +27,17 @@ from PySide6.QtWidgets import (
 )
 
 from . import config
+from .core import commit as commit_mod
 from .core import fetcher
+from .core import libtable
+from .core import project as project_mod
 from .core.kicad_env import KicadInstall, detect_installs
 from .ui.details import DetailsHeader
 from .ui.registerdialog import RegisterDialog
 from .ui.svgview import SvgView
 from .ui.symboltab import SymbolTab
 from .ui.view3d import View3D
-from .workers import CommitJob, FetchJob
+from .workers import CommitJob, FetchJob, ImportJob
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +59,12 @@ class MainWindow(QMainWindow):
         self._installs: list[KicadInstall] = detect_installs()
         self._bundles: dict[str, object] = {}
         self._current = None
+        self._project: project_mod.KicadProject | None = None
         self._busy: set[str] = set()
+        # QThreadPool owns the C++ runnable, but nothing keeps the Python
+        # wrapper - and its signals object - alive. Drop the reference and the
+        # connections die silently, so hold them until the job reports back.
+        self._jobs: set = set()
 
         self._build_ui()
         self._restore()
@@ -85,6 +93,7 @@ class MainWindow(QMainWindow):
         root.addWidget(splitter, 1)
 
         root.addLayout(self._build_action_row())
+        root.addLayout(self._build_project_row())
 
         self.setStatusBar(QStatusBar())
         self.statusBar().showMessage("Ready")
@@ -196,6 +205,32 @@ class MainWindow(QMainWindow):
         row.addWidget(self._download_button)
         return row
 
+    def _build_project_row(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(8)
+
+        row.addWidget(QLabel("Project:"))
+        self._project_edit = QLineEdit(config.get_str("project/root"))
+        self._project_edit.setPlaceholderText(
+            "A KiCad project folder — the one holding the .kicad_pro"
+        )
+        self._project_edit.textChanged.connect(self._on_project_changed)
+        row.addWidget(self._project_edit, 1)
+
+        project_browse = QPushButton("Browse…")
+        project_browse.clicked.connect(self._on_browse_project)
+        row.addWidget(project_browse)
+
+        self._import_button = QPushButton("Import")
+        self._import_button.setToolTip(
+            "Copy this part into the project and register it in that project's "
+            "symbol and footprint libraries"
+        )
+        self._import_button.setEnabled(False)
+        self._import_button.clicked.connect(self._on_import)
+        row.addWidget(self._import_button)
+        return row
+
     # -- state -----------------------------------------------------------
 
     def _restore(self) -> None:
@@ -210,6 +245,7 @@ class MainWindow(QMainWindow):
         if symbol_split:
             self._symbol_tab.splitter.restoreState(symbol_split)
         self._hidden_pins.setChecked(config.get_bool("preview/include_hidden_pins", True))
+        self._on_project_changed(self._project_edit.text())
         self._show_grid.setChecked(self._view3d.grid_visible())
 
         preferred = config.get_str("kicad/version")
@@ -225,6 +261,7 @@ class MainWindow(QMainWindow):
         store.setValue("ui/symbol_splitter", self._symbol_tab.splitter.saveState())
         store.setValue("preview/include_hidden_pins", self._hidden_pins.isChecked())
         store.setValue("output/root", self._root_edit.text())
+        store.setValue("project/root", self._project_edit.text())
         store.sync()
         for bundle in self._bundles.values():
             try:
@@ -269,6 +306,14 @@ class MainWindow(QMainWindow):
         if queued:
             self._entry.clear()
 
+    def _retain(self, job) -> None:
+        """Keep *job* alive until one of its signals fires."""
+        self._jobs.add(job)
+        for name in ("finished", "failed"):
+            signal = getattr(job.signals, name, None)
+            if signal is not None:
+                signal.connect(lambda *_a, _j=job: self._jobs.discard(_j))
+
     def _start_fetch(self, lcsc_id: str) -> None:
         config.ensure_dirs()
         self._busy.add(lcsc_id)
@@ -283,6 +328,7 @@ class MainWindow(QMainWindow):
         job.signals.progress.connect(self._on_progress)
         job.signals.finished.connect(self._on_fetched)
         job.signals.failed.connect(self._on_failed)
+        self._retain(job)
         self._pool.start(job)
 
     def _on_progress(self, lcsc_id: str, message: str) -> None:
@@ -349,6 +395,7 @@ class MainWindow(QMainWindow):
         self._current = bundle
         self._details.show_bundle(bundle)
         self._download_button.setEnabled(True)
+        self._refresh_import_button()
 
         units = bundle.ki_symbol_svgs
         multi = len(units) > 1
@@ -437,6 +484,7 @@ class MainWindow(QMainWindow):
         job = CommitJob(bundle, root, on_exists)
         job.signals.finished.connect(self._on_committed)
         job.signals.failed.connect(self._on_commit_failed)
+        self._retain(job)
         self._pool.start(job)
 
     def _on_committed(self, lcsc_id: str, result, problems) -> None:
@@ -453,6 +501,120 @@ class MainWindow(QMainWindow):
 
         dialog = RegisterDialog(result, self._installs, self._install, self)
         dialog.exec()
+
+    # -- import into a project -------------------------------------------
+
+    def _on_project_changed(self, text: str) -> None:
+        self._project = project_mod.find_project(text)
+        if not text.strip():
+            self.statusBar().clearMessage()
+        elif self._project is None:
+            self.statusBar().showMessage("No .kicad_pro found in that folder.")
+        else:
+            self.statusBar().showMessage(f"Project: {self._project.name}")
+        self._refresh_import_button()
+
+    def _refresh_import_button(self) -> None:
+        self._import_button.setEnabled(
+            self._current is not None and getattr(self, "_project", None) is not None
+        )
+
+    def _on_browse_project(self) -> None:
+        chosen = QFileDialog.getExistingDirectory(
+            self, "Choose a KiCad project folder", self._project_edit.text()
+        )
+        if chosen:
+            self._project_edit.setText(chosen)
+            config.set_value("project/root", chosen)
+
+    def _on_import(self) -> None:
+        bundle = self._current
+        project = getattr(self, "_project", None)
+        if bundle is None or project is None:
+            return
+
+        # Importing while KiCad is open is safe - it just won't be visible
+        # until the project is reopened - so this only decides what to say
+        # afterwards, not whether to proceed.
+        kicad_open = libtable.kicad_is_running()
+
+        destination = project.libs_dir / bundle.folder_name
+        on_exists = "overwrite"
+        holder = commit_mod.occupant(destination, bundle.folder_name)
+        if holder is not None and holder != bundle.lcsc_id:
+            # Same name, different part. Overwriting would silently repoint an
+            # existing library-table row at another component.
+            box = QMessageBox(self)
+            box.setWindowTitle("That name is taken")
+            box.setText(
+                f"{bundle.folder_name} in {project.name} is "
+                + (f"{holder}." if holder else "a library from somewhere else.")
+            )
+            box.setInformativeText("Replace it, or import this one alongside it?")
+            replace = box.addButton("Replace", QMessageBox.ButtonRole.DestructiveRole)
+            alongside = box.addButton("Import alongside", QMessageBox.ButtonRole.AcceptRole)
+            box.addButton(QMessageBox.StandardButton.Cancel)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked is alongside:
+                on_exists = "rename"
+            elif clicked is not replace:
+                return
+
+        try:
+            save_root = Path(self._root_edit.text()).expanduser().resolve(strict=False)
+        except OSError:
+            save_root = None
+        if save_root is not None and save_root == project.libs_dir:
+            QMessageBox.warning(
+                self,
+                "Same folder",
+                "'Save to' points at this project's own library folder. A later "
+                "Download there would rewrite these files with absolute 3D model "
+                "paths, undoing the project-relative import. Pick a different "
+                "library root.",
+            )
+
+        self._pending_kicad_open = kicad_open
+        self._import_button.setEnabled(False)
+        self.statusBar().showMessage(f"{bundle.lcsc_id}: importing into {project.name}…")
+
+        job = ImportJob(bundle, project, on_exists)
+        job.signals.finished.connect(self._on_imported)
+        job.signals.failed.connect(self._on_import_failed)
+        self._retain(job)
+        self._pool.start(job)
+
+    def _on_imported(self, lcsc_id: str, result) -> None:
+        self._refresh_import_button()
+        config.set_value("project/root", self._project_edit.text())
+        self.statusBar().showMessage(
+            f"{lcsc_id}: {result.nickname} imported into {result.project.name} "
+            f"({result.summary().replace(chr(10), ', ').lower()})"
+        )
+
+        notes = list(result.problems)
+        if getattr(self, "_pending_kicad_open", False):
+            notes.append(
+                "KiCad is open. Close and reopen the project to see "
+                f"{result.nickname} — it reads the library tables when the "
+                "project opens. Until then, don't press OK in Manage Symbol "
+                "Libraries: that rewrites the tables from memory."
+            )
+        if not notes:
+            return
+        QMessageBox.information(
+            self,
+            "Imported",
+            f"<b>{result.nickname}</b> is in <b>{result.project.name}</b>."
+            f"<br><br>" + "<br><br>".join(notes),
+        )
+
+    def _on_import_failed(self, lcsc_id: str, message: str, trace: str) -> None:
+        self._refresh_import_button()
+        QMessageBox.critical(self, "Could not import", f"{lcsc_id}\n\n{message}")
+        if trace:
+            log.error("%s import failed:\n%s", lcsc_id, trace)
 
     def _on_commit_failed(self, lcsc_id: str, message: str, trace: str) -> None:
         self._download_button.setEnabled(True)

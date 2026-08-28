@@ -11,8 +11,10 @@ then save a folder KiCad can import. A desktop GUI for
 - Fetches any LCSC / EasyEDA part by part number — `C54951858`, or a whole
   pasted list.
 - Shows you the **symbol, footprint and 3D model before you commit to anything**.
-- Writes one self-contained, importable folder per part, and offers to register
-  it with KiCad for you.
+- **Download** writes a self-contained folder to your library shelf, and offers
+  to register it in KiCad's global libraries.
+- **Import** drops the part straight into a KiCad project instead, registered in
+  that project only.
 
 ## Why the preview is trustworthy
 
@@ -113,33 +115,54 @@ spaces, commas or newlines — to queue them all.
 
 ![The 3D tab](docs/3d.png)
 
-**3.** Choose where to save, and press **Download**.
+**3.** Then either:
 
-**4.** A dialog shows the two library-table rows KiCad needs. Copy them in
-yourself, or let the app add them.
+- **Download** — saves the part to your library shelf (the "Save to" folder) and
+  offers to add it to KiCad's *global* libraries, so it's available in every
+  project.
+- **Import** — copies the part into a KiCad project's `libs/` folder and adds it
+  to *that project's own* library tables. Point "Project" at the folder holding
+  the `.kicad_pro`; the button stays greyed until a project is found there.
+
+Import writes its paths as `${KIPRJMOD}`, KiCad's variable for the project
+folder, so you can move, zip or share the project and the libraries and 3D
+models still resolve. Reopen the project in KiCad afterwards — it reads its
+library tables when the project opens.
 
 ## What gets written
 
-Each part becomes one self-contained folder:
+Each part becomes one self-contained folder, named after the part — and so is
+everything inside it, so a folder tells you what it holds at a glance:
 
 ```
 ESP32-C5-WROOM-1U-N8R8-V1.2/
-├── C54951858.kicad_sym
-├── C54951858.pretty/
+├── ESP32-C5-WROOM-1U-N8R8-V1.2.kicad_sym
+├── ESP32-C5-WROOM-1U-N8R8-V1.2.pretty/
 │   └── COMM-SMD_32P-L21.2-W18.0_ESP32-C5-WROOM-1U.kicad_mod
-└── C54951858.3dshapes/
+└── ESP32-C5-WROOM-1U-N8R8-V1.2.3dshapes/
     ├── COMM-SMD_32P-….step
     └── COMM-SMD_32P-….wrl
 ```
 
-The folder is named after the part; the LCSC id is the library nickname and the
-stem of every file inside it. The symbol's Footprint field is set to
-`C54951858:<footprint>`, so it resolves as soon as the `.pretty` is registered
-under the nickname `C54951858`.
+That one name is also the KiCad library nickname, so the symbol's Footprint
+field reads `ESP32-C5-WROOM-1U-N8R8-V1.2:COMM-SMD_32P-…`. The LCSC id isn't
+lost — it's the symbol's "LCSC Part" field, and the description on both
+library-table rows.
 
-Two parts that share a name land in the same folder rather than overwriting
-each other, since their files are named by LCSC id. You'll be asked before
-anything is replaced.
+**Import** puts the same folder under `<project>/libs/` instead:
+
+```
+MyBoard/
+├── MyBoard.kicad_pro
+├── sym-lib-table      ← one row added, ${KIPRJMOD}-relative
+├── fp-lib-table       ← one row added
+└── libs/
+    └── ESP32-C5-WROOM-1U-N8R8-V1.2/ …
+```
+
+If two different parts sanitise to the same name, you're asked whether to
+replace the existing one or import alongside it as `…_2`, which becomes a
+genuinely separate library with its own nickname.
 
 ## Adding the libraries to KiCad
 
@@ -184,7 +207,12 @@ x86-64 Windows. There are none for 32-bit Python or Windows on ARM.
 just EasyEDA's rather than KiCad's.
 
 **My symbols don't appear in KiCad.** Restart KiCad — it caches the library
-tables at start-up.
+tables at start-up. After an **Import**, close and reopen the *project*.
+
+**I imported while KiCad was open.** The files and rows are written correctly,
+but KiCad won't see them until the project is reopened. Until then, avoid
+pressing OK in Manage Symbol Libraries: that rewrites the tables from KiCad's
+in-memory copy and would drop the new row.
 
 ## Limitations
 
@@ -192,9 +220,14 @@ tables at start-up.
   cover Linux and macOS, but the launcher scripts are `.bat` and nobody has
   tried it there.
 - One folder per part means two library-table rows per part. Convenient to
-  share or delete a single part; your tables grow as you download.
-- 3D model paths are written as absolute paths, so moving a part folder after
-  downloading breaks its 3D reference.
+  share or delete a single part; your tables grow as you add parts.
+- **Download** writes absolute 3D model paths, so moving a part folder
+  afterwards breaks its 3D reference. **Import** writes `${KIPRJMOD}`-relative
+  paths and does not have this problem.
+- Import registers the libraries; it does not place the symbol on your
+  schematic. KiCad has no supported API for that — the plugin API in KiCad 9
+  and 10 covers the board editor only — and hand-editing a `.kicad_sch` risks
+  a file you may have open.
 - **Without KiCad installed**, symbols are written in the KiCad 6 file format.
   Every later version reads it, but you don't get to choose.
 - Generated libraries follow `easyeda2kicad`'s output, not the

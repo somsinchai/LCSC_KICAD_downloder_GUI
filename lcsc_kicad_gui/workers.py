@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, QRunnable, Signal
 
 from .core import commit as commit_mod
 from .core import fetcher
+from .core import project as project_mod
 from .core.kicad_env import KicadInstall
 
 
@@ -20,6 +21,11 @@ class FetchSignals(QObject):
 
 class CommitSignals(QObject):
     finished = Signal(str, object, object)  # lcsc_id, CommitResult, problems
+    failed = Signal(str, str, str)
+
+
+class ImportSignals(QObject):
+    finished = Signal(str, object)  # lcsc_id, ImportResult
     failed = Signal(str, str, str)
 
 
@@ -74,3 +80,24 @@ class CommitJob(QRunnable):
             self.signals.failed.emit(lcsc_id, str(err), traceback.format_exc())
         else:
             self.signals.finished.emit(lcsc_id, result, problems)
+
+
+class ImportJob(QRunnable):
+    """Copy a part into a KiCad project and register its two libraries."""
+
+    def __init__(self, bundle, project, on_exists: str) -> None:
+        super().__init__()
+        self.bundle = bundle
+        self.signals = ImportSignals()
+        self._project = project
+        self._on_exists = on_exists
+        self.setAutoDelete(True)
+
+    def run(self) -> None:  # noqa: D102
+        lcsc_id = self.bundle.lcsc_id
+        try:
+            result = project_mod.import_part(self.bundle, self._project, self._on_exists)
+        except Exception as err:
+            self.signals.failed.emit(lcsc_id, str(err), traceback.format_exc())
+        else:
+            self.signals.finished.emit(lcsc_id, result)

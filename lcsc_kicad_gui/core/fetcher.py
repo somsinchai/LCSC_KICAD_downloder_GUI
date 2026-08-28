@@ -128,11 +128,15 @@ class PartBundle:
     obj_path: Path | None = None
     obj_bounds: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
     has_3d: bool = False
+    # Symbol library schema version chosen for the target KiCad.
+    sym_format_version: int | None = None
     # (name, value) exactly as written into the .kicad_sym
     properties: list[SymbolProperty] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    # Retained so commit can re-export the footprint with its final 3D path.
+    # Retained so commit can re-export both with their final names: the
+    # footprint needs the final 3D path, the symbol needs the final nickname.
     _ee_footprint: Any = None
+    _ee_symbol: Any = None
 
     @property
     def has_kicad_symbol_render(self) -> bool:
@@ -237,12 +241,15 @@ def _fetch(
         description=ee_symbol.info.description or cad.get("description", ""),
     )
 
-    staging = StagingArea(lcsc_id)
+    folder_name = folder_name_for(lcsc_id, info.mpn or info.name)
+    # One name for the folder, the library files and the KiCad nickname.
+    staging = StagingArea(lcsc_id, lib_name=folder_name)
     bundle = PartBundle(
         lcsc_id=lcsc_id,
         info=info,
         staging=staging,
-        folder_name=folder_name_for(lcsc_id, info.mpn or info.name),
+        folder_name=folder_name,
+        sym_format_version=install.sym_format_version if install else None,
         symbol_name=ee_symbol.info.name,
         pin_count=len(ee_symbol.pins),
         unit_count=1 + len(ee_symbol.sub_symbols or []),
@@ -313,7 +320,7 @@ def _fetch(
     symbol_exporter = ExporterSymbolKicad(
         symbol=ee_symbol,
         lib_path=None,
-        version=install.sym_format_version if install else None,
+        version=bundle.sym_format_version,
     )
     if not symbol_exporter.save_to_lib(
         lib_path=str(staging.sym_path),
@@ -322,6 +329,7 @@ def _fetch(
     ):
         raise FetchError(f"Could not write the symbol library for {lcsc_id}.")
 
+    bundle._ee_symbol = ee_symbol
     bundle.properties = read_symbol_properties(staging.sym_path)
 
     progress("Rendering previews…")
