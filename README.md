@@ -123,7 +123,7 @@ yourself, or let the app add them.
 Each part becomes one self-contained folder:
 
 ```
-C54951858_ESP32-C5-WROOM-1U-N8R8-V1.2/
+ESP32-C5-WROOM-1U-N8R8-V1.2/
 ├── C54951858.kicad_sym
 ├── C54951858.pretty/
 │   └── COMM-SMD_32P-L21.2-W18.0_ESP32-C5-WROOM-1U.kicad_mod
@@ -132,8 +132,14 @@ C54951858_ESP32-C5-WROOM-1U-N8R8-V1.2/
     └── COMM-SMD_32P-….wrl
 ```
 
-The symbol's Footprint field is set to `C54951858:<footprint>`, so it resolves
-as soon as the `.pretty` is registered under the nickname `C54951858`.
+The folder is named after the part; the LCSC id is the library nickname and the
+stem of every file inside it. The symbol's Footprint field is set to
+`C54951858:<footprint>`, so it resolves as soon as the `.pretty` is registered
+under the nickname `C54951858`.
+
+Two parts that share a name land in the same folder rather than overwriting
+each other, since their files are named by LCSC id. You'll be asked before
+anything is replaced.
 
 ## Adding the libraries to KiCad
 

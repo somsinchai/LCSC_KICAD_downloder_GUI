@@ -34,9 +34,14 @@ def sanitize_name(name: str, max_len: int = MAX_NAME_LEN) -> str:
 
 
 def folder_name_for(lcsc_id: str, symbol_name: str) -> str:
-    """`C54951858_ESP32-C5-WROOM-1U-N8R8-V1.2`"""
-    suffix = sanitize_name(symbol_name)
-    return f"{lcsc_id}_{suffix}" if suffix else lcsc_id
+    """The part's own name, e.g. `ESP32-C5-WROOM-1U-N8R8-V1.2`.
+
+    The LCSC id is not in the folder name — it is still the library nickname
+    and the stem of every file inside, so nothing is lost by leaving it out of
+    the folder. Falls back to the id when the part has no usable name.
+    """
+    name = sanitize_name(symbol_name)
+    return name if name and name != "part" else lcsc_id
 
 
 class StagingArea:
