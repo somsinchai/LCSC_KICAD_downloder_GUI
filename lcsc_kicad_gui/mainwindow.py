@@ -8,6 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QThreadPool
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -65,6 +66,13 @@ class MainWindow(QMainWindow):
         # wrapper - and its signals object - alive. Drop the reference and the
         # connections die silently, so hold them until the job reports back.
         self._jobs: set = set()
+        # Removed from the list while their fetch was still running: the
+        # result is thrown away when it arrives instead of re-adding the row.
+        self._discarded: set[str] = set()
+        # Save/import jobs read the staging folder, so a removed part's files
+        # are only deleted once nothing is using them. Keyed by id(bundle).
+        self._in_use: dict[int, int] = {}
+        self._orphans: dict[int, object] = {}
 
         self._build_ui()
         self._restore()
@@ -137,8 +145,22 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(QLabel("Fetched parts"))
         self._list = QListWidget()
+        self._list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._list.currentItemChanged.connect(self._on_selection)
+        self._list.itemSelectionChanged.connect(self._refresh_remove_button)
         layout.addWidget(self._list, 1)
+
+        self._remove_button = QPushButton("Remove")
+        self._remove_button.setToolTip("Remove the selected parts from the list (Del)")
+        self._remove_button.setEnabled(False)
+        self._remove_button.clicked.connect(self._on_remove)
+        layout.addWidget(self._remove_button)
+
+        remove_action = QAction("Remove", self._list)
+        remove_action.setShortcut(QKeySequence.StandardKey.Delete)
+        remove_action.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
+        remove_action.triggered.connect(self._on_remove)
+        self._list.addAction(remove_action)
 
         self._hidden_pins = QCheckBox("Show hidden pins in preview")
         self._hidden_pins.setChecked(True)
@@ -263,11 +285,8 @@ class MainWindow(QMainWindow):
         store.setValue("output/root", self._root_edit.text())
         store.setValue("project/root", self._project_edit.text())
         store.sync()
-        for bundle in self._bundles.values():
-            try:
-                bundle.staging.cleanup()
-            except Exception:
-                pass
+        for bundle in [*self._bundles.values(), *self._orphans.values()]:
+            self._cleanup(bundle)
         super().closeEvent(event)
 
     def _report_environment(self) -> None:
@@ -300,6 +319,12 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(f"'{token}' is not an LCSC part number.")
                 continue
             if part_id in self._busy:
+                if part_id in self._discarded:
+                    # Removed while fetching, then asked for again: keep the
+                    # running fetch instead of starting a second one.
+                    self._discarded.discard(part_id)
+                    self._set_list_status(part_id, "fetching…")
+                    queued += 1
                 continue
             self._start_fetch(part_id)
             queued += 1
@@ -336,12 +361,13 @@ class MainWindow(QMainWindow):
 
     def _on_fetched(self, lcsc_id: str, bundle) -> None:
         self._busy.discard(lcsc_id)
+        if lcsc_id in self._discarded:
+            self._discarded.discard(lcsc_id)
+            self._cleanup(bundle)
+            return
         previous = self._bundles.get(lcsc_id)
         if previous is not None:
-            try:
-                previous.staging.cleanup()
-            except Exception:
-                pass
+            self._release_or_cleanup(previous)
         self._bundles[lcsc_id] = bundle
         self._set_list_status(lcsc_id, bundle.info.mpn or bundle.info.name, data=lcsc_id)
         self.statusBar().showMessage(f"{lcsc_id}: ready")
@@ -357,6 +383,9 @@ class MainWindow(QMainWindow):
 
     def _on_failed(self, lcsc_id: str, message: str, trace: str) -> None:
         self._busy.discard(lcsc_id)
+        if lcsc_id in self._discarded:
+            self._discarded.discard(lcsc_id)
+            return
         self._set_list_status(lcsc_id, f"failed — {message}")
         self.statusBar().showMessage(f"{lcsc_id}: {message}")
         if trace:
@@ -383,11 +412,88 @@ class MainWindow(QMainWindow):
 
     def _on_selection(self, current: QListWidgetItem | None, _previous=None) -> None:
         if current is None:
+            self._clear_preview()
             return
         lcsc_id = current.data(Qt.ItemDataRole.UserRole + 1)
         bundle = self._bundles.get(lcsc_id)
         if bundle is not None:
             self._show(bundle)
+
+    def _refresh_remove_button(self) -> None:
+        self._remove_button.setEnabled(bool(self._list.selectedItems()))
+
+    def _on_remove(self) -> None:
+        items = self._list.selectedItems()
+        if not items:
+            return
+        current_id = self._current.lcsc_id if self._current is not None else None
+        removed_current = False
+        for item in items:
+            lcsc_id = item.data(Qt.ItemDataRole.UserRole + 1)
+            if lcsc_id in self._busy:
+                self._discarded.add(lcsc_id)
+            bundle = self._bundles.pop(lcsc_id, None)
+            if bundle is not None:
+                self._release_or_cleanup(bundle)
+            removed_current |= lcsc_id == current_id
+            self._list.takeItem(self._list.row(item))
+
+        if removed_current:
+            # Clear first: the row that inherits the selection may still be
+            # fetching (no bundle), and must not keep showing the removed part.
+            self._clear_preview()
+            current = self._list.currentItem()
+            if current is not None:
+                self._on_selection(current)
+        self._refresh_remove_button()
+        count = len(items)
+        noun = "part" if count == 1 else "parts"
+        self.statusBar().showMessage(f"Removed {count} {noun} from the list.")
+
+    def _clear_preview(self) -> None:
+        self._current = None
+        self._details.clear()
+        self._symbol_tab.clear()
+        self._footprint_view.clear()
+        self._view3d.clear()
+        self._unit_label.setVisible(False)
+        self._unit_combo.setVisible(False)
+        self._download_button.setEnabled(False)
+        self._refresh_import_button()
+
+    # -- staging lifetime ------------------------------------------------
+
+    @staticmethod
+    def _cleanup(bundle) -> None:
+        try:
+            bundle.staging.cleanup()
+        except Exception:
+            pass
+
+    def _hold(self, bundle, job) -> None:
+        """Keep *bundle*'s staging files until *job* reports back."""
+        key = id(bundle)
+        self._in_use[key] = self._in_use.get(key, 0) + 1
+
+        def release(*_args) -> None:
+            remaining = self._in_use.get(key, 1) - 1
+            if remaining > 0:
+                self._in_use[key] = remaining
+                return
+            self._in_use.pop(key, None)
+            orphan = self._orphans.pop(key, None)
+            if orphan is not None:
+                self._cleanup(orphan)
+
+        job.signals.finished.connect(release)
+        job.signals.failed.connect(release)
+
+    def _release_or_cleanup(self, bundle) -> None:
+        """Delete *bundle*'s staging files now, or once its last job ends."""
+        if self._in_use.get(id(bundle)):
+            self._orphans[id(bundle)] = bundle
+        else:
+            self._cleanup(bundle)
 
     # -- preview ---------------------------------------------------------
 
@@ -485,10 +591,11 @@ class MainWindow(QMainWindow):
         job.signals.finished.connect(self._on_committed)
         job.signals.failed.connect(self._on_commit_failed)
         self._retain(job)
+        self._hold(bundle, job)
         self._pool.start(job)
 
     def _on_committed(self, lcsc_id: str, result, problems) -> None:
-        self._download_button.setEnabled(True)
+        self._download_button.setEnabled(self._current is not None)
         config.set_value("output/root", self._root_edit.text())
 
         if problems:
@@ -583,6 +690,7 @@ class MainWindow(QMainWindow):
         job.signals.finished.connect(self._on_imported)
         job.signals.failed.connect(self._on_import_failed)
         self._retain(job)
+        self._hold(bundle, job)
         self._pool.start(job)
 
     def _on_imported(self, lcsc_id: str, result) -> None:
@@ -617,7 +725,7 @@ class MainWindow(QMainWindow):
             log.error("%s import failed:\n%s", lcsc_id, trace)
 
     def _on_commit_failed(self, lcsc_id: str, message: str, trace: str) -> None:
-        self._download_button.setEnabled(True)
+        self._download_button.setEnabled(self._current is not None)
         QMessageBox.critical(self, "Could not save", f"{lcsc_id}\n\n{message}")
         if trace:
             log.error("%s commit failed:\n%s", lcsc_id, trace)

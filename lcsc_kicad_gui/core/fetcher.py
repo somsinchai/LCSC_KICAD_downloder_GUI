@@ -11,6 +11,7 @@ import json
 import logging
 import re
 import socket
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -175,6 +176,31 @@ def _online() -> bool:
         return False
 
 
+FETCH_ATTEMPTS = 3
+
+
+def _get_cad_data(api: EasyedaApi, lcsc_id: str, progress: Callable[[str], None]) -> dict:
+    """EasyEDA's API intermittently answers a valid part with nothing; retry.
+
+    The library returns {} for every failure (bad response, timeout, success:
+    false), so an empty result is not proof the part doesn't exist. Failed
+    answers are never cached, so a retry always goes back to the network.
+    """
+    for attempt in range(1, FETCH_ATTEMPTS + 1):
+        try:
+            cad = api.get_cad_data_of_component(lcsc_id=lcsc_id)
+        except OSError as err:  # e.g. a socket timeout the library doesn't catch
+            log.debug("EasyEDA request for %s raised %s", lcsc_id, err)
+            cad = {}
+        if cad:
+            return cad
+        if attempt < FETCH_ATTEMPTS:
+            log.debug("EasyEDA returned nothing for %s (attempt %d)", lcsc_id, attempt)
+            progress(f"EasyEDA returned nothing for {lcsc_id}, retrying ({attempt + 1}/{FETCH_ATTEMPTS})…")
+            time.sleep(1.5 * attempt)
+    return {}
+
+
 def normalize_lcsc_id(text: str) -> str:
     cleaned = text.strip().upper().removeprefix("LCSC").strip()
     if cleaned.isdigit():
@@ -221,12 +247,16 @@ def _fetch(
         api.cache_dir = Path(cache_dir)
 
     progress(f"Fetching {lcsc_id} from EasyEDA…")
-    cad = api.get_cad_data_of_component(lcsc_id=lcsc_id)
+    cad = _get_cad_data(api, lcsc_id, progress)
     if not cad:
         # The library swallows every exception and returns {}, so work out why.
         if not _online():
             raise FetchError("Can't reach easyeda.com. Check your network and try again.")
-        raise FetchError(f"EasyEDA has no CAD data for {lcsc_id}. Check the part number.")
+        raise FetchError(
+            f"EasyEDA returned no CAD data for {lcsc_id} after {FETCH_ATTEMPTS} tries. "
+            "Its API fails intermittently, so try again in a moment; if it keeps "
+            "failing, check the part number."
+        )
 
     progress("Converting symbol…")
     ee_symbol = EasyedaSymbolImporter(easyeda_cp_cad_data=cad).get_symbol()

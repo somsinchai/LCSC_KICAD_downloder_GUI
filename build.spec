@@ -42,6 +42,9 @@ hiddenimports = [
     "PySide6.QtSvg",
     "PySide6.QtSvgWidgets",
     "PySide6.QtNetwork",
+    # easyeda2kicad imports it optionally; without it TLS falls back to the
+    # flaky Windows store. PyInstaller's certifi hook ships cacert.pem.
+    "certifi",
 ]
 
 excludes = [

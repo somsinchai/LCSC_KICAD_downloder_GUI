@@ -46,6 +46,14 @@ Does all of the EasyEDA → KiCad conversion. It is used **unmodified**, exactly
 as published on PyPI. Because this program imports it in-process, the two form
 a single combined work, which is why this program is also AGPL-3.0-only.
 
+### certifi — MPL-2.0
+
+Copyright © Kenneth Reitz and contributors.
+<https://github.com/certifi/python-certifi>
+
+Mozilla's CA certificate bundle, used unmodified to verify HTTPS connections
+to EasyEDA. Source is available from the link above and from PyPI.
+
 ### Python — PSF License 2.0
 
 Copyright © Python Software Foundation.

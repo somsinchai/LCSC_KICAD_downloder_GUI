@@ -7,3 +7,9 @@ PySide6>=6.7,<7
 # cache methods, ExporterSymbolKicad(version=...), Ee3dModel.raw_obj), so stay
 # on the 1.0.x line rather than trusting a future API.
 easyeda2kicad>=1.0.1,<1.1
+
+# easyeda2kicad verifies TLS with certifi when it is installed, else the
+# Windows certificate store -- which intermittently fails easyeda.com's
+# Sectigo chain ("unable to get issuer certificate"), and the library reports
+# that only as "no data". Ship a known CA bundle instead.
+certifi>=2024.2.2

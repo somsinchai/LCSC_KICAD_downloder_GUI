@@ -9,7 +9,7 @@ then save a folder KiCad can import. A desktop GUI for
 ## What it does
 
 - Fetches any LCSC / EasyEDA part by part number — `C54951858`, or a whole
-  pasted list.
+  pasted list. **Remove** (or Del) clears parts you don't want from the list.
 - Shows you the **symbol, footprint and 3D model before you commit to anything**.
 - **Download** writes a self-contained folder to your library shelf, and offers
   to register it in KiCad's global libraries.
