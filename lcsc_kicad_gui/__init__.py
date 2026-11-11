@@ -16,4 +16,4 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 """LCSC part downloader with KiCad-accurate previews."""
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
