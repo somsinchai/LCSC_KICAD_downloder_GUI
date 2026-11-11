@@ -61,6 +61,8 @@ class MainWindow(QMainWindow):
         self._bundles: dict[str, object] = {}
         self._current = None
         self._project: project_mod.KicadProject | None = None
+        self._importing = False
+        self._pending_skipped: list = []
         self._busy: set[str] = set()
         # QThreadPool owns the C++ runnable, but nothing keeps the Python
         # wrapper - and its signals object - alive. Drop the reference and the
@@ -245,8 +247,9 @@ class MainWindow(QMainWindow):
 
         self._import_button = QPushButton("Import")
         self._import_button.setToolTip(
-            "Copy this part into the project and register it in that project's "
-            "symbol and footprint libraries"
+            "Copy every part in the list into the project and register it in "
+            "that project's symbol and footprint libraries. Parts already in "
+            "the project are only replaced if you say so."
         )
         self._import_button.setEnabled(False)
         self._import_button.clicked.connect(self._on_import)
@@ -371,6 +374,7 @@ class MainWindow(QMainWindow):
         self._bundles[lcsc_id] = bundle
         self._set_list_status(lcsc_id, bundle.info.mpn or bundle.info.name, data=lcsc_id)
         self.statusBar().showMessage(f"{lcsc_id}: ready")
+        self._refresh_import_button()
 
         item = self._find_item(lcsc_id)
         if item is not None and (self._list.currentItem() is None or self._current is None):
@@ -446,6 +450,7 @@ class MainWindow(QMainWindow):
             if current is not None:
                 self._on_selection(current)
         self._refresh_remove_button()
+        self._refresh_import_button()
         count = len(items)
         noun = "part" if count == 1 else "parts"
         self.statusBar().showMessage(f"Removed {count} {noun} from the list.")
@@ -623,8 +628,23 @@ class MainWindow(QMainWindow):
 
     def _refresh_import_button(self) -> None:
         self._import_button.setEnabled(
-            self._current is not None and getattr(self, "_project", None) is not None
+            not getattr(self, "_importing", False)
+            and getattr(self, "_project", None) is not None
+            and bool(self._listed_bundles())
         )
+
+    def _listed_bundles(self) -> list:
+        """Fetched parts, in list order. Rows still fetching are left out."""
+        lst = getattr(self, "_list", None)
+        if lst is None:
+            return []
+        bundles = []
+        for index in range(lst.count()):
+            lcsc_id = lst.item(index).data(Qt.ItemDataRole.UserRole + 1)
+            bundle = self._bundles.get(lcsc_id)
+            if bundle is not None:
+                bundles.append(bundle)
+        return bundles
 
     def _on_browse_project(self) -> None:
         chosen = QFileDialog.getExistingDirectory(
@@ -635,9 +655,9 @@ class MainWindow(QMainWindow):
             config.set_value("project/root", chosen)
 
     def _on_import(self) -> None:
-        bundle = self._current
         project = getattr(self, "_project", None)
-        if bundle is None or project is None:
+        bundles = self._listed_bundles()
+        if project is None or not bundles:
             return
 
         # Importing while KiCad is open is safe - it just won't be visible
@@ -645,27 +665,53 @@ class MainWindow(QMainWindow):
         # afterwards, not whether to proceed.
         kicad_open = libtable.kicad_is_running()
 
-        destination = project.libs_dir / bundle.folder_name
-        on_exists = "overwrite"
-        holder = commit_mod.occupant(destination, bundle.folder_name)
-        if holder is not None and holder != bundle.lcsc_id:
-            # Same name, different part. Overwriting would silently repoint an
-            # existing library-table row at another component.
-            box = QMessageBox(self)
-            box.setWindowTitle("That name is taken")
-            box.setText(
-                f"{bundle.folder_name} in {project.name} is "
-                + (f"{holder}." if holder else "a library from somewhere else.")
+        plan: list = []  # [(bundle, on_exists), ...] in list order
+        existing: list = []  # this same part is already in the project
+        for bundle in bundles:
+            holder = commit_mod.occupant(
+                project.libs_dir / bundle.folder_name, bundle.folder_name
             )
-            box.setInformativeText("Replace it, or import this one alongside it?")
-            replace = box.addButton("Replace", QMessageBox.ButtonRole.DestructiveRole)
-            alongside = box.addButton("Import alongside", QMessageBox.ButtonRole.AcceptRole)
+            if holder is None:
+                plan.append((bundle, "overwrite"))  # nothing there yet
+            elif holder == bundle.lcsc_id:
+                existing.append(bundle)
+            else:
+                # Same name, different part (or a hand-made library). Replacing
+                # it would silently repoint an existing library-table row at
+                # another component, so this part goes in under a new name.
+                plan.append((bundle, "rename"))
+
+        skipped: list = []
+        if existing:
+            count = len(existing)
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Question)
+            box.setWindowTitle("Already imported")
+            box.setText(
+                f"{count} part{'s are' if count != 1 else ' is'} already in "
+                f"{project.name}:"
+            )
+            box.setInformativeText(
+                "\n".join(f"• {b.folder_name} ({b.lcsc_id})" for b in existing)
+                + "\n\nOverwrite "
+                + ("them" if count != 1 else "it")
+                + " with the version from the list?"
+            )
+            overwrite = box.addButton("Overwrite", QMessageBox.ButtonRole.DestructiveRole)
+            skip = None
+            if plan:
+                skip = box.addButton("Skip these", QMessageBox.ButtonRole.AcceptRole)
             box.addButton(QMessageBox.StandardButton.Cancel)
             box.exec()
             clicked = box.clickedButton()
-            if clicked is alongside:
-                on_exists = "rename"
-            elif clicked is not replace:
+            if clicked is overwrite:
+                plan += [(b, "overwrite") for b in existing]
+                # Back into list order, so the summary reads like the list.
+                order = {id(b): n for n, b in enumerate(bundles)}
+                plan.sort(key=lambda step: order[id(step[0])])
+            elif skip is not None and clicked is skip:
+                skipped = existing
+            else:
                 return
 
         try:
@@ -683,46 +729,80 @@ class MainWindow(QMainWindow):
             )
 
         self._pending_kicad_open = kicad_open
-        self._import_button.setEnabled(False)
-        self.statusBar().showMessage(f"{bundle.lcsc_id}: importing into {project.name}…")
+        self._pending_skipped = skipped
+        self._importing = True
+        self._refresh_import_button()
+        noun = "part" if len(plan) == 1 else "parts"
+        self.statusBar().showMessage(f"Importing {len(plan)} {noun} into {project.name}…")
 
-        job = ImportJob(bundle, project, on_exists)
+        job = ImportJob(plan, project)
+        job.signals.progress.connect(self._on_progress)
         job.signals.finished.connect(self._on_imported)
         job.signals.failed.connect(self._on_import_failed)
         self._retain(job)
-        self._hold(bundle, job)
+        for bundle, _ in plan:
+            self._hold(bundle, job)
         self._pool.start(job)
 
-    def _on_imported(self, lcsc_id: str, result) -> None:
+    def _on_imported(self, outcomes) -> None:
+        self._importing = False
         self._refresh_import_button()
         config.set_value("project/root", self._project_edit.text())
-        self.statusBar().showMessage(
-            f"{lcsc_id}: {result.nickname} imported into {result.project.name} "
-            f"({result.summary().replace(chr(10), ', ').lower()})"
-        )
 
-        notes = list(result.problems)
-        if getattr(self, "_pending_kicad_open", False):
-            notes.append(
-                "KiCad is open. Close and reopen the project to see "
-                f"{result.nickname} — it reads the library tables when the "
-                "project opens. Until then, don't press OK in Manage Symbol "
-                "Libraries: that rewrites the tables from memory."
+        done = [(lcsc_id, r) for lcsc_id, r, _e, _t in outcomes if r is not None]
+        failed = [(lcsc_id, e) for lcsc_id, r, e, _t in outcomes if r is None]
+        for lcsc_id, r, _e, trace in outcomes:
+            if r is None and trace:
+                log.error("%s import failed:\n%s", lcsc_id, trace)
+        skipped = self._pending_skipped
+
+        if done:
+            project_name = done[0][1].project.name
+        elif self._project is not None:
+            project_name = self._project.name
+        else:
+            project_name = "the project"
+
+        status = f"Imported {len(done)} into {project_name}"
+        if skipped:
+            status += f", skipped {len(skipped)} already there"
+        if failed:
+            status += f", {len(failed)} failed"
+        self.statusBar().showMessage(status + ".")
+
+        lines = []
+        for lcsc_id, result in done:
+            line = f"✔ <b>{result.nickname}</b> ({lcsc_id})"
+            bundle = self._bundles.get(lcsc_id)
+            if bundle is not None and result.nickname != bundle.folder_name:
+                line += " — name was taken by another library, imported alongside it"
+            lines.append(line)
+            lines += [f"&nbsp;&nbsp;&nbsp;⚠ {p}" for p in result.problems]
+        for bundle in skipped:
+            lines.append(f"– {bundle.folder_name} ({bundle.lcsc_id}): already imported, skipped")
+        for lcsc_id, message in failed:
+            lines.append(f"✘ {lcsc_id}: {message}")
+
+        text = f"Project <b>{project_name}</b><br><br>" + "<br>".join(lines)
+        if done and self._pending_kicad_open:
+            text += (
+                "<br><br>KiCad is open. Close and reopen the project to see the "
+                "new libraries — it reads the library tables when the project "
+                "opens. Until then, don't press OK in Manage Symbol Libraries: "
+                "that rewrites the tables from memory."
             )
-        if not notes:
-            return
-        QMessageBox.information(
-            self,
-            "Imported",
-            f"<b>{result.nickname}</b> is in <b>{result.project.name}</b>."
-            f"<br><br>" + "<br><br>".join(notes),
-        )
+        if failed:
+            title = "Import finished with errors" if done else "Could not import"
+            QMessageBox.warning(self, title, text)
+        else:
+            QMessageBox.information(self, "Imported", text)
 
-    def _on_import_failed(self, lcsc_id: str, message: str, trace: str) -> None:
+    def _on_import_failed(self, _lcsc_id: str, message: str, trace: str) -> None:
+        self._importing = False
         self._refresh_import_button()
-        QMessageBox.critical(self, "Could not import", f"{lcsc_id}\n\n{message}")
+        QMessageBox.critical(self, "Could not import", message)
         if trace:
-            log.error("%s import failed:\n%s", lcsc_id, trace)
+            log.error("import failed:\n%s", trace)
 
     def _on_commit_failed(self, lcsc_id: str, message: str, trace: str) -> None:
         self._download_button.setEnabled(self._current is not None)

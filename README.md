@@ -13,8 +13,8 @@ then save a folder KiCad can import. A desktop GUI for
 - Shows you the **symbol, footprint and 3D model before you commit to anything**.
 - **Download** writes a self-contained folder to your library shelf, and offers
   to register it in KiCad's global libraries.
-- **Import** drops the part straight into a KiCad project instead, registered in
-  that project only.
+- **Import** drops every part in the list straight into a KiCad project instead,
+  registered in that project only.
 
 ## Why the preview is trustworthy
 
@@ -120,9 +120,12 @@ spaces, commas or newlines — to queue them all.
 - **Download** — saves the part to your library shelf (the "Save to" folder) and
   offers to add it to KiCad's *global* libraries, so it's available in every
   project.
-- **Import** — copies the part into a KiCad project's `libs/` folder and adds it
-  to *that project's own* library tables. Point "Project" at the folder holding
-  the `.kicad_pro`; the button stays greyed until a project is found there.
+- **Import** — copies every fetched part in the list into a KiCad project's
+  `libs/` folder and adds them to *that project's own* library tables. Parts not
+  in the project yet go straight in; if some are already there, you're asked
+  once whether to overwrite them or skip them. Point "Project" at the folder
+  holding the `.kicad_pro`; the button stays greyed until a project is found
+  there.
 
 Import writes its paths as `${KIPRJMOD}`, KiCad's variable for the project
 folder, so you can move, zip or share the project and the libraries and 3D
@@ -160,8 +163,9 @@ MyBoard/
     └── ESP32-C5-WROOM-1U-N8R8-V1.2/ …
 ```
 
-If two different parts sanitise to the same name, you're asked whether to
-replace the existing one or import alongside it as `…_2`, which becomes a
+If two different parts sanitise to the same name, Download asks whether to
+replace the existing one or save alongside it as `…_2`; Import always puts the
+new part in alongside, never over a different part. The `…_2` copy is a
 genuinely separate library with its own nickname.
 
 ## Adding the libraries to KiCad

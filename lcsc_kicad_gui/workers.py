@@ -25,8 +25,10 @@ class CommitSignals(QObject):
 
 
 class ImportSignals(QObject):
-    finished = Signal(str, object)  # lcsc_id, ImportResult
-    failed = Signal(str, str, str)
+    progress = Signal(str, str)  # lcsc_id, message
+    # [(lcsc_id, ImportResult | None, error message, traceback), ...]
+    finished = Signal(object)
+    failed = Signal(str, str, str)  # only if the batch itself blows up
 
 
 class FetchJob(QRunnable):
@@ -83,21 +85,34 @@ class CommitJob(QRunnable):
 
 
 class ImportJob(QRunnable):
-    """Copy a part into a KiCad project and register its two libraries."""
+    """Copy parts into a KiCad project and register their libraries.
 
-    def __init__(self, bundle, project, on_exists: str) -> None:
+    Runs the parts one after another: every import rewrites the same project
+    sym-lib-table and fp-lib-table, so doing them in parallel would race.
+    *plan* is ``[(bundle, on_exists), ...]``. One part failing doesn't stop
+    the rest; each outcome is reported in ``finished``.
+    """
+
+    def __init__(self, plan, project) -> None:
         super().__init__()
-        self.bundle = bundle
+        self.plan = list(plan)
         self.signals = ImportSignals()
         self._project = project
-        self._on_exists = on_exists
         self.setAutoDelete(True)
 
     def run(self) -> None:  # noqa: D102
-        lcsc_id = self.bundle.lcsc_id
+        outcomes = []
         try:
-            result = project_mod.import_part(self.bundle, self._project, self._on_exists)
-        except Exception as err:
-            self.signals.failed.emit(lcsc_id, str(err), traceback.format_exc())
+            for bundle, on_exists in self.plan:
+                lcsc_id = bundle.lcsc_id
+                self.signals.progress.emit(lcsc_id, f"importing into {self._project.name}…")
+                try:
+                    result = project_mod.import_part(bundle, self._project, on_exists)
+                except Exception as err:
+                    outcomes.append((lcsc_id, None, str(err), traceback.format_exc()))
+                else:
+                    outcomes.append((lcsc_id, result, "", ""))
+        except Exception as err:  # never let a worker take the app down
+            self.signals.failed.emit("", str(err), traceback.format_exc())
         else:
-            self.signals.finished.emit(lcsc_id, result)
+            self.signals.finished.emit(outcomes)
